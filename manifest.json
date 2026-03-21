@@ -1,0 +1,16 @@
+{
+  "name": "Treasury Position Calc",
+  "short_name": "BondCalc",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#050a05",
+  "theme_color": "#050a05",
+  "icons": [
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

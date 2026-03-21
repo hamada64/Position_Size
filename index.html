@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Treasury Futures Position Size Calculator</title>
+<style>
+body{
+font-family:Arial;
+background:#050a05;
+color:#c8ffc8;
+display:flex;
+justify-content:center;
+align-items:center;
+height:100vh;
+margin:0;
+}
+.form-group {
+  margin-bottom:2px;     /* ← this controls space BETWEEN groups */
+}
+h2 {
+  text-align: center;           /* centers the text inside */
+  margin-left: auto;
+  margin-right: auto;
+  width: fit-content;           /* or a fixed width like 400px */
+}
+.label {
+  margin-bottom: 6px;      /* space between text and its input */
+  font-size: 14px;
+  color: #88ff88;
+}
+.card{
+background:#071007;
+padding:30px;
+width:540px;
+border:1px solid #00ff41;
+border-radius:8px;
+}
+.tabs{
+display:flex;
+gap:4px;
+margin-bottom:15px;
+flex-wrap:wrap;
+}
+.tab{
+flex:1;
+text-align:center;
+padding:8px;
+cursor:pointer;
+border:1px solid #00ff41;
+border-radius:4px;
+background:#0a1a0a;
+min-width:80px;
+}
+.tab:hover{
+background:#0f260f;
+}
+.active{
+background:#002b0c;
+font-weight:bold;
+}
+input, button{
+width:100%;
+padding:10px;
+margin-bottom:12px;
+background:#021802;
+border:1px solid #00ff41;
+color:#c8ffc8;
+border-radius:4px;
+box-sizing:border-box;
+}
+button{
+background:#048d26;
+color:white;
+border:none;
+cursor:pointer;
+font-weight:bold;
+font-size:16px;
+}
+button:hover{
+background:#06a32e;
+}
+.row{
+display:flex;
+justify-content:space-between;
+margin:6px 0;
+font-size:14px;
+}
+.contracts{
+font-size:32px;
+text-align:center;
+margin:15px 0;
+font-weight:bold;
+color:#00ff41;
+}
+#spec{
+font-size:14px;
+color:#88ff88;
+}
+hr{
+border-color:#00ff41;
+opacity:0.3;
+margin:12px 0;
+}
+</style>
+</head>
+<body>
+<div class="card">
+<h2>Futures Position Size Calculator</h2>
+
+<div class="tabs">
+<div class="tab active" onclick="selectInstrument('UB',1000,32,5940,this)">UB (Ultra T-Bond)</div>
+<div class="tab" onclick="selectInstrument('ZB',1000,32,4200,this)">ZB (30Y)</div>
+<div class="tab" onclick="selectInstrument('ZN',1000,64,2156,this)">ZN (10Y)</div>
+<div class="tab" onclick="selectInstrument('ZF',1000,128,1438,this)">ZF (5Y)</div>
+<div class="tab" onclick="selectInstrument('ZT',2000,256,1380,this)">ZT (2Y)</div>
+</div>
+
+<div id="spec">UB | Tick 1/32 | 1 pt = $1000 | Margin $5940</div>
+<br>
+
+<!-- replace from Account Balance to Stop Loss -->
+
+<div class="form-group">
+  <div class="label">Account Balance ($)</div>
+  <input id="account" value="25000" type="number" step="1000">
+</div>
+
+<div class="form-group">
+  <div class="label">Risk %</div>
+  <input id="risk" value="2" type="number" step="0.5" min="1" max="5">
+</div>
+
+<div class="form-group">
+  <div class="label">Margin ($)</div>
+  <input id="margin" value="5940" type="number">
+</div>
+
+<div class="form-group">
+  <div class="label">Entry Price</div>
+  <input id="entry" placeholder="e.g. 117'02">
+</div>
+
+<div class="form-group">
+  <div class="label">Stop Loss</div>
+  <input id="stop" placeholder="e.g. 116'165">
+</div>
+
+<button onclick="calculate()">CALCULATE</button>
+
+<div id="results" style="display:none">
+<div class="contracts" id="contracts"></div>
+
+<div class="row"><span>Total Risk:</span><span id="riskTotal"></span></div>
+<div class="row"><span>Margin Required:</span><span id="marginTotal"></span></div>
+<div class="row"><span>Stop Distance (points):</span><span id="distance"></span></div>
+<div class="row"><span>Risk per Contract:</span><span id="riskContract"></span></div>
+
+<hr>
+
+<div class="row"><span>1R Target:</span><span id="r1"></span></div>
+<div class="row"><span>2R Target:</span><span id="r2"></span></div>
+<div class="row"><span>3R Target:</span><span id="r3"></span></div>
+</div>
+</div>
+
+<script>
+let POINT_VALUE = 1000;
+let TICK_DENOM = 32;
+
+function selectInstrument(symbol, pointVal, tickDenom, margin, el) {
+  POINT_VALUE = pointVal;
+  TICK_DENOM = tickDenom;
+  document.getElementById("margin").value = margin;
+  document.getElementById("spec").innerText = 
+    `${symbol} | Tick 1/${tickDenom} | 1 pt = $${pointVal} | Margin $${margin}`;
+  
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  el.classList.add("active");
+}
+
+function bondToDecimal(price) {
+  price = price.toString().trim();
+  if (price.includes("'")) {
+    let parts = price.split("'");
+    let whole = parseFloat(parts[0]) || 0;
+    let frac = parts[1] ? parseFloat(parts[1]) : 0;
+    return whole + (frac / TICK_DENOM);
+  }
+  return parseFloat(price) || 0;
+}
+
+function decimalToBond(price) {
+  if (isNaN(price) || price < 0) return "";
+  let whole = Math.floor(price);
+  let frac = price - whole;
+  let ticks = Math.round(frac * TICK_DENOM);
+  let digits = (TICK_DENOM === 32) ? 2 : 3;
+  let ticksStr = ticks.toString().padStart(digits, "0");
+  return whole + "'" + ticksStr;
+}
+
+function calculate() {
+  let account     = parseFloat(document.getElementById("account").value) || 0;
+  let riskPercent = parseFloat(document.getElementById("risk").value) || 0;
+  let margin      = parseFloat(document.getElementById("margin").value) || 0;
+  let entry       = bondToDecimal(document.getElementById("entry").value);
+  let stop        = bondToDecimal(document.getElementById("stop").value);
+
+  let stopDistance = Math.abs(entry - stop);
+  let riskPerContract = stopDistance * POINT_VALUE;
+  let maxRisk = account * (riskPercent / 100);
+
+  let contracts = (riskPerContract > 0) ? Math.floor(maxRisk / riskPerContract) : 0;
+  let totalRisk   = contracts * riskPerContract;
+  let totalMargin = contracts * margin;
+
+  let direction = (entry > stop) ? "LONG" : (entry < stop) ? "SHORT" : "FLAT";
+
+  let r = stopDistance;
+  let r1 = direction === "LONG" ? entry + r : entry - r;
+  let r2 = direction === "LONG" ? entry + 2 * r : entry - 2 * r;
+  let r3 = direction === "LONG" ? entry + 3 * r : entry - 3 * r;
+
+  document.getElementById("contracts").innerText   = contracts + (contracts === 1 ? " Contract" : " Contracts");
+  document.getElementById("riskTotal").innerText   = "$" + totalRisk.toFixed(2);
+  document.getElementById("marginTotal").innerText = "$" + totalMargin.toFixed(0);
+  document.getElementById("distance").innerText    = stopDistance.toFixed(6);
+  document.getElementById("riskContract").innerText = "$" + riskPerContract.toFixed(2);
+  document.getElementById("r1").innerText = decimalToBond(r1);
+  document.getElementById("r2").innerText = decimalToBond(r2);
+  document.getElementById("r3").innerText = decimalToBond(r3);
+
+  document.getElementById("results").style.display = "block";
+}
+</script>
+</body>
+</html>

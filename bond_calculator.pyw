@@ -21,24 +21,101 @@ INSTRUMENTS = [
     ("ZT (2Y)",           "ZT",  2000, 256, 1380),
 ]
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── FIXED HELPERS: correctly handle trader shorthand for ALL instruments ───────
 def bond_to_decimal(price: str, tick_denom: int) -> float:
+    """
+    Parse common trader price format used on every platform:
+      • 117'02     → 117 + 2/32
+      • 116'165    → 116 + 16.5/32   (ZN)
+      • 116'162    → 116 + 16.25/32  (ZF)
+      • 116'161    → 116 + 16.125/32 (ZT)
+    Works perfectly for UB/ZB/ZF/ZN/ZT.
+    """
     price = price.strip()
-    if "'" in price:
-        whole_s, frac_s = price.split("'", 1)
-        whole = float(whole_s) if whole_s else 0.0
-        frac  = float(frac_s)  if frac_s  else 0.0
-        return whole + frac / tick_denom
-    return float(price) if price else 0.0
+    if "'" not in price:
+        return float(price) if price else 0.0
+
+    whole_s, frac_s = [x.strip() for x in price.split("'", 1)]
+    whole = float(whole_s) if whole_s else 0.0
+    if not frac_s:
+        return whole
+
+    # Normalize to 32nds + fractional 32nds
+    if len(frac_s) == 2:                                      # ZB / UB
+        int_32nds = int(frac_s)
+        frac_32nd = 0.0
+    elif len(frac_s) == 3:                                    # ZN / ZF / ZT
+        int_32nds = int(frac_s[:2])
+        frac_code = int(frac_s[2])
+        ticks_per_32nd = tick_denom // 32
+
+        if ticks_per_32nd == 2:   # ZN (halves)
+            frac_32nd = 0.5 if frac_code == 5 else 0.0
+        elif ticks_per_32nd == 4: # ZF (quarters)
+            frac_map = {0: 0.0, 2: 0.25, 5: 0.5, 7: 0.75}
+            frac_32nd = frac_map.get(frac_code, 0.0)
+        elif ticks_per_32nd == 8: # ZT (eighths)
+            frac_32nd = frac_code / 8.0
+        else:
+            frac_32nd = 0.0
+    else:
+        int_32nds = int(frac_s)
+        frac_32nd = 0.0
+
+    total_32nds = int_32nds + frac_32nd
+    decimal = whole + total_32nds / 32.0
+
+    # Safety carry-over
+    if total_32nds >= 32:
+        decimal += 1.0
+    return decimal
+
 
 def decimal_to_bond(price: float, tick_denom: int) -> str:
+    """
+    Output in the exact trader-friendly shorthand that bond_to_decimal accepts:
+      • ZB/UB → 117'02
+      • ZN    → 116'165
+      • ZF    → 116'162
+      • ZT    → 116'161
+    """
     if price < 0:
         return ""
+
     whole = int(price)
-    frac  = price - whole
-    ticks = round(frac * tick_denom)
-    digits = 2 if tick_denom == 32 else 3
-    return f"{whole}'{str(ticks).zfill(digits)}"
+    frac_points = price - whole
+
+    # Convert fractional point → total 32nds
+    total_32nds = frac_points * 32
+
+    # Round to the contract's exact precision
+    ticks_per_32nd = tick_denom // 32
+    precision_32nd = 1.0 / ticks_per_32nd
+    total_32nds_rounded = round(total_32nds / precision_32nd) * precision_32nd
+
+    # Carry-over if rounding pushes us to next point
+    if total_32nds_rounded >= 32:
+        whole += 1
+        total_32nds_rounded -= 32
+
+    int_32nds = int(total_32nds_rounded)
+    frac_32nd = total_32nds_rounded - int_32nds
+
+    if tick_denom == 32:                                      # ZB / UB → 2 digits
+        return f"{whole}'{str(int_32nds).zfill(2)}"
+
+    # 3-digit trader shorthand for ZN / ZF / ZT
+    if ticks_per_32nd == 2:                                   # ZN
+        frac_digit = 5 if frac_32nd >= 0.25 else 0
+    elif ticks_per_32nd == 4:                                 # ZF
+        frac_map = {0.0: 0, 0.25: 2, 0.5: 5, 0.75: 7}
+        frac_digit = frac_map.get(frac_32nd, 0)
+    elif ticks_per_32nd == 8:                                 # ZT
+        frac_digit = round(frac_32nd * 8)
+    else:
+        frac_digit = 0
+
+    return f"{whole}'{str(int_32nds).zfill(2)}{frac_digit}"
 
 
 # ── Main App ──────────────────────────────────────────────────────────────────
@@ -130,7 +207,7 @@ class BondCalcApp(tk.Tk):
         calc_btn = tk.Button(
             card, text="CALCULATE", bg=BTN_BG, fg="white",
             activebackground=BTN_HOV, activeforeground="white",
-            relief="flat", bd=0, cursor="hand2",
+            relief="groove", bd=2, cursor="hand2",
             font=("Arial", 13, "bold"),
             command=self._calculate
         )
@@ -199,9 +276,13 @@ class BondCalcApp(tk.Tk):
         self.point_value.set(pv)
         self.tick_denom.set(td)
         self.margin_var.set(str(margin))
+
+        # Changed: now displays tick value instead of point value
+        tick_value = pv / td
         self.spec_var.set(
-            f"{sym}  |  Tick 1/{td}  |  1 pt = ${pv:,}  |  Margin ${margin:,}"
+            f"{sym}  |  Tick 1/{td}  |  1 tick = ${tick_value:g}  |  Margin ${margin:,}"
         )
+
         for i, btn in enumerate(self.tab_btns):
             btn.config(bg="#002b0c" if i == idx else INPUT_BG,
                        font=("Arial", 9, "bold") if i == idx else ("Arial", 9))
